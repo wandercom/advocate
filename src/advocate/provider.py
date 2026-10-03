@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import tomllib
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 
 # ---- Approximate pricing (USD per 1M tokens) ----
@@ -65,19 +67,80 @@ _RETIRED_MODEL_REPLACEMENTS: dict[str, str] = {
     "claude-3-5-haiku-20241022": "claude-haiku-4-5",
 }
 
-_ANTHROPIC_API_KEY_ENV_VARS = (
-    "WANDER_ANTHROPIC_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "JMC_ANTHROPIC_API_KEY",
-)
+# Which environment variables hold the Anthropic key, in preference order.
+# Default is the vendor-standard name. Operators who keep several billing
+# keys can configure the ordered list of NAMES (never values) either with
+# ADVOCATE_ANTHROPIC_API_KEY_ENV (comma-separated) or in
+# $XDG_CONFIG_HOME/advocate/config.toml (default ~/.config/advocate/config.toml):
+#
+#     anthropic_api_key_env = ["MY_ORG_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"]
+#
+# The env var wins over the file. See config.example.toml.
+_DEFAULT_ANTHROPIC_API_KEY_ENV_VARS: tuple[str, ...] = ("ANTHROPIC_API_KEY",)
+_ANTHROPIC_API_KEY_ENV_OVERRIDE = "ADVOCATE_ANTHROPIC_API_KEY_ENV"
+_CONFIG_KEY = "anthropic_api_key_env"
+
+
+def config_path() -> Path:
+    """Location of the optional user config file (XDG, outside any repo)."""
+    base = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    root = Path(base) if base else Path.home() / ".config"
+    return root / "advocate" / "config.toml"
+
+
+def _anthropic_api_key_env_vars() -> tuple[str, ...]:
+    """Ordered env-var names to try for the Anthropic key.
+
+    A malformed config raises instead of silently falling back: billing the
+    wrong account quietly is worse than failing loudly.
+    """
+    raw = os.environ.get(_ANTHROPIC_API_KEY_ENV_OVERRIDE, "").strip()
+    if raw:
+        names = tuple(n.strip() for n in raw.split(",") if n.strip())
+        if not names:
+            raise RuntimeError(
+                f"{_ANTHROPIC_API_KEY_ENV_OVERRIDE} is set but names no environment variables"
+            )
+        return names
+    path = config_path()
+    try:
+        with path.open("rb") as fh:
+            data = tomllib.load(fh)
+    except FileNotFoundError:
+        return _DEFAULT_ANTHROPIC_API_KEY_ENV_VARS
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        raise RuntimeError(f"Could not read Advocate config {path}: {exc}") from exc
+    names = data.get(_CONFIG_KEY)
+    if names is None:
+        return _DEFAULT_ANTHROPIC_API_KEY_ENV_VARS
+    if isinstance(names, str):
+        names = [n.strip() for n in names.split(",")]
+    if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+        raise RuntimeError(
+            f"{path}: '{_CONFIG_KEY}' must be a list of environment variable names"
+        )
+    cleaned = tuple(n.strip() for n in names if n.strip())
+    if not cleaned:
+        raise RuntimeError(f"{path}: '{_CONFIG_KEY}' names no environment variables")
+    return cleaned
 
 
 def _anthropic_api_key() -> str | None:
-    """Resolve the Anthropic billing key, preferring the Wander account."""
-    for name in _ANTHROPIC_API_KEY_ENV_VARS:
+    """Resolve the Anthropic key from the configured env-var names, in order.
+
+    With an explicit (non-default) configuration and none of its names set,
+    raise rather than return None: the SDK would otherwise fall back to its
+    own ANTHROPIC_API_KEY lookup and bill an account the operator excluded.
+    """
+    names = _anthropic_api_key_env_vars()
+    for name in names:
         value = os.environ.get(name, "").strip()
         if value:
             return value
+    if names != _DEFAULT_ANTHROPIC_API_KEY_ENV_VARS:
+        raise RuntimeError(
+            "No Anthropic API key found in the configured env vars: " + ", ".join(names)
+        )
     return None
 
 

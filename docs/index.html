@@ -211,7 +211,7 @@ advocate review src/ --provider openai --model gpt-5.4-mini</code></pre>
       </div>
       <div class="feature">
         <h3>Multi-Provider</h3>
-        <p>Claude Sonnet 4.6, OpenAI, or Gemini. Anthropic reviews prefer <code>WANDER_ANTHROPIC_API_KEY</code> for billing, with generic and JMC keys as fallbacks. With transmogrifier integration for prompt optimization across models.</p>
+        <p>Claude Sonnet 4.6, OpenAI, or Gemini. Anthropic reviews read <code>ANTHROPIC_API_KEY</code> by default; the key-name order is configurable via <code>ADVOCATE_ANTHROPIC_API_KEY_ENV</code> or <code>~/.config/advocate/config.toml</code>. With transmogrifier integration for prompt optimization across models.</p>
       </div>
       <div class="feature">
         <h3>Self-Reviewed</h3>
