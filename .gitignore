@@ -4,3 +4,10 @@ __pycache__/
 dist/
 build/
 .eggs/
+
+# Generated Pact run state (absolute local paths; not needed to operate)
+.pact/state.json
+.pact/test-gen/analysis.json
+
+# User config lives in ~/.config/advocate/, never in the repo
+config.toml
