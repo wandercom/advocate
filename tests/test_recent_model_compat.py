@@ -88,14 +88,55 @@ async def test_anthropic_provider_honors_key_order_config_file(
         'anthropic_api_key_env = ["ORG_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"]\n'
     )
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.delenv("ORG_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ORG_ANTHROPIC_API_KEY", "org-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "generic-key")
 
     with patch("anthropic.AsyncAnthropic", return_value=_mock_anthropic_client()) as client_cls:
         await AnthropicProvider("claude-sonnet-4-6").complete("system", "user", 16)
 
-    # First configured name is unset, so the next one in order wins.
-    assert client_cls.call_args.kwargs["api_key"] == "generic-key"
+    # The file's order, not the default, decides between two set keys.
+    assert client_cls.call_args.kwargs["api_key"] == "org-key"
+
+
+def test_configured_names_all_unset_does_not_fall_back_to_sdk_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from advocate.provider import _anthropic_api_key
+
+    monkeypatch.setenv("ADVOCATE_ANTHROPIC_API_KEY_ENV", "ORG_ANTHROPIC_API_KEY")
+    monkeypatch.delenv("ORG_ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "excluded-key")
+
+    with pytest.raises(RuntimeError, match="ORG_ANTHROPIC_API_KEY"):
+        _anthropic_api_key()
+
+
+@pytest.mark.parametrize("override", [",", " , "])
+def test_empty_key_order_override_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, override: str
+) -> None:
+    from advocate.provider import _anthropic_api_key
+
+    monkeypatch.setenv("ADVOCATE_ANTHROPIC_API_KEY_ENV", override)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "generic-key")
+
+    with pytest.raises(RuntimeError, match="names no environment variables"):
+        _anthropic_api_key()
+
+
+def test_empty_key_order_config_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from advocate.provider import _anthropic_api_key
+
+    cfg = tmp_path / "advocate" / "config.toml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("anthropic_api_key_env = []\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "generic-key")
+
+    with pytest.raises(RuntimeError, match="names no environment variables"):
+        _anthropic_api_key()
 
 
 def test_malformed_key_config_fails_loudly(

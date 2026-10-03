@@ -97,8 +97,11 @@ def _anthropic_api_key_env_vars() -> tuple[str, ...]:
     raw = os.environ.get(_ANTHROPIC_API_KEY_ENV_OVERRIDE, "").strip()
     if raw:
         names = tuple(n.strip() for n in raw.split(",") if n.strip())
-        if names:
-            return names
+        if not names:
+            raise RuntimeError(
+                f"{_ANTHROPIC_API_KEY_ENV_OVERRIDE} is set but names no environment variables"
+            )
+        return names
     path = config_path()
     try:
         with path.open("rb") as fh:
@@ -117,15 +120,27 @@ def _anthropic_api_key_env_vars() -> tuple[str, ...]:
             f"{path}: '{_CONFIG_KEY}' must be a list of environment variable names"
         )
     cleaned = tuple(n.strip() for n in names if n.strip())
-    return cleaned or _DEFAULT_ANTHROPIC_API_KEY_ENV_VARS
+    if not cleaned:
+        raise RuntimeError(f"{path}: '{_CONFIG_KEY}' names no environment variables")
+    return cleaned
 
 
 def _anthropic_api_key() -> str | None:
-    """Resolve the Anthropic key from the configured env-var names, in order."""
-    for name in _anthropic_api_key_env_vars():
+    """Resolve the Anthropic key from the configured env-var names, in order.
+
+    With an explicit (non-default) configuration and none of its names set,
+    raise rather than return None: the SDK would otherwise fall back to its
+    own ANTHROPIC_API_KEY lookup and bill an account the operator excluded.
+    """
+    names = _anthropic_api_key_env_vars()
+    for name in names:
         value = os.environ.get(name, "").strip()
         if value:
             return value
+    if names != _DEFAULT_ANTHROPIC_API_KEY_ENV_VARS:
+        raise RuntimeError(
+            "No Anthropic API key found in the configured env vars: " + ", ".join(names)
+        )
     return None
 
 
